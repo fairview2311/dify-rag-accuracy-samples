@@ -1,0 +1,247 @@
+app:
+  description: 受信トレイの【問い合わせ】の未読メールを読み、社内規程と手順書のナレッジから、返信の下書きを Outlook に作る
+  icon: ✉️
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: 問い合わせメールの返信の下書き
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    edges:
+    - {id: start-list, source: start, sourceHandle: source, target: list, targetHandle: target}
+    - {id: list-pick, source: list, sourceHandle: source, target: pick, targetHandle: target}
+    - {id: pick-loop, source: pick, sourceHandle: source, target: loop, targetHandle: target}
+    - {id: loopstart-split, source: loopstart, sourceHandle: source, target: split, targetHandle: target, data: {isInIteration: true, iteration_id: loop}}
+    - {id: split-kr, source: split, sourceHandle: source, target: kr, targetHandle: target, data: {isInIteration: true, iteration_id: loop}}
+    - {id: kr-rules, source: kr, sourceHandle: source, target: rules, targetHandle: target, data: {isInIteration: true, iteration_id: loop}}
+    - {id: rules-llm, source: rules, sourceHandle: source, target: llm, targetHandle: target, data: {isInIteration: true, iteration_id: loop}}
+    - {id: llm-draft, source: llm, sourceHandle: source, target: draft, targetHandle: target, data: {isInIteration: true, iteration_id: loop}}
+    - {id: loop-summary, source: loop, sourceHandle: source, target: summary, targetHandle: target}
+    - {id: summary-end, source: summary, sourceHandle: source, target: end, targetHandle: target}
+    nodes:
+    - data: {desc: '', title: 開始, type: start, variables: []}
+      id: start
+      position: {x: 30, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: langgenius/outlook/outlook
+        provider_name: langgenius/outlook/outlook
+        provider_type: builtin
+        title: メールを読む
+        tool_configurations: {}
+        tool_label: メッセージ一覧
+        tool_name: list_messages
+        tool_node_version: '2'
+        tool_parameters:
+          include_body: {type: constant, value: true}
+          limit: {type: constant, value: 20}
+          search: {type: mixed, value: 問い合わせ}
+        type: tool
+      id: list
+      position: {x: 330, y: 280}
+      type: custom
+    - data:
+        code: "def main(data: list) -> dict:\n    mails = []\n    for m in data[0].get(\"emails\", []):\n        if m[\"subject\"].startswith(\"【問い合わせ】\") and not m[\"is_read\"]:\n            mails.append({\"subject\": m[\"subject\"], \"body\": m[\"body\"][\"content\"],\n                          \"sender\": m[\"sender\"][\"email\"]})\n    return {\"mails\": mails}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          mails: {children: null, type: 'array[object]'}
+        title: 問い合わせだけ取り出す
+        type: code
+        variables:
+        - {value_selector: [list, json], variable: data}
+      id: pick
+      position: {x: 630, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        error_handle_mode: continue-on-error
+        is_parallel: false
+        iterator_input_type: 'array[object]'
+        iterator_selector: [pick, mails]
+        output_selector: [draft, subject]
+        output_type: 'array[string]'
+        start_node_id: loopstart
+        title: 1通ずつ下書きを作る
+        type: iteration
+        width: 1530
+        height: 200
+      height: 200
+      width: 1530
+      id: loop
+      position: {x: 930, y: 230}
+      type: custom
+      zIndex: 1
+    - data: {desc: '', isInIteration: true, title: '', type: iteration-start}
+      draggable: false
+      id: loopstart
+      parentId: loop
+      position: {x: 24, y: 68}
+      selectable: false
+      type: custom-iteration-start
+      zIndex: 1002
+    - data:
+        code: "def main(mail: dict) -> dict:\n    return {\"subject\": mail[\"subject\"], \"sender\": mail[\"sender\"],\n            \"query\": mail[\"subject\"] + \"\\n\" + mail[\"body\"]}\n"
+        code_language: python3
+        desc: ''
+        isInIteration: true
+        iteration_id: loop
+        outputs:
+          query: {children: null, type: string}
+          sender: {children: null, type: string}
+          subject: {children: null, type: string}
+        title: メールを分ける
+        type: code
+        variables:
+        - {value_selector: [loop, item], variable: mail}
+      id: split
+      parentId: loop
+      position: {x: 128, y: 68}
+      type: custom
+      zIndex: 1002
+    - data:
+        dataset_ids:
+        - ナレッジの ID
+        desc: ''
+        isInIteration: true
+        iteration_id: loop
+        metadata_filtering_conditions:
+          conditions:
+          - {comparison_operator: is, name: 状態, value: 有効}
+          logical_operator: and
+        metadata_filtering_mode: manual
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model: {model: jina-reranker-m0, provider: langgenius/jina/jina}
+          top_k: 4
+        query_variable_selector: [split, query]
+        retrieval_mode: multiple
+        title: 規程を探す
+        type: knowledge-retrieval
+      id: kr
+      parentId: loop
+      position: {x: 428, y: 68}
+      type: custom
+      zIndex: 1002
+    - data:
+        desc: ''
+        isInIteration: true
+        iteration_id: loop
+        template: '{% for r in docs %}
+
+          ### {{ r.metadata.document_name }}
+
+          出典: {{ r.metadata.doc_metadata["出典"] }}
+
+          {{ r.content }}
+
+          {% endfor %}'
+        title: 規程を並べる
+        type: template-transform
+        variables:
+        - {value_selector: [kr, result], variable: docs}
+      id: rules
+      parentId: loop
+      position: {x: 728, y: 68}
+      type: custom
+      zIndex: 1002
+    - data:
+        context: {enabled: false, variable_selector: []}
+        desc: ''
+        isInIteration: true
+        iteration_id: loop
+        model:
+          completion_params: {temperature: 0.2}
+          mode: chat
+          name: gpt-6.1-terra
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは、みどり文具株式会社の総務部の担当です。社員から届いた問い合わせメールに、返信の下書きを書きます。次の「社内規程」に書いてあることだけを使います。
+
+
+            ## 社内規程
+
+            {{#rules.output#}}
+
+
+            ## 書き方
+
+            - 1行目は「お問い合わせありがとうございます。総務部です。」とする
+
+            - 次に、質問への答えを結論から2〜3文で書く
+
+            - 答えの根拠にした規程の名前と、その規程の「出典:」の URL を「参考:」として書く
+
+            - 社内規程に答えが書いていないときは、推測で答えず、「担当者が確認のうえ、改めてご連絡します。」と書く
+
+            - 最後の行は「総務部」とする
+
+            - 件名や宛名は書かない。Markdown の記号（# や **）は使わない'
+        - role: user
+          text: '{{#split.query#}}'
+        title: 返信の文を作る
+        type: llm
+        variables: []
+        vision: {enabled: false}
+      id: llm
+      parentId: loop
+      position: {x: 1028, y: 68}
+      type: custom
+      zIndex: 1002
+    - data:
+        desc: ''
+        isInIteration: true
+        iteration_id: loop
+        provider_id: langgenius/outlook/outlook
+        provider_name: langgenius/outlook/outlook
+        provider_type: builtin
+        title: 下書きを作る
+        tool_configurations: {}
+        tool_label: メールの下書き作成
+        tool_name: draft_email
+        tool_node_version: '2'
+        tool_parameters:
+          body: {type: mixed, value: '{{#llm.text#}}'}
+          body_type: {type: constant, value: text}
+          subject: {type: mixed, value: 'Re: {{#split.subject#}}'}
+          to_recipients: {type: mixed, value: '{{#split.sender#}}'}
+        type: tool
+      id: draft
+      parentId: loop
+      position: {x: 1328, y: 68}
+      type: custom
+      zIndex: 1002
+    - data:
+        desc: ''
+        template: '{{ subjects | length }} 通の問い合わせに、返信の下書きを作りました。
+
+          {% for s in subjects %}
+
+          - {{ s }}
+
+          {% endfor %}'
+        title: 結果をまとめる
+        type: template-transform
+        variables:
+        - {value_selector: [loop, output], variable: subjects}
+      id: summary
+      position: {x: 2530, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        outputs:
+        - {value_selector: [summary, output], value_type: string, variable: result}
+        title: 終了
+        type: end
+      id: end
+      position: {x: 2830, y: 280}
+      type: custom

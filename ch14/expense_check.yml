@@ -1,0 +1,144 @@
+app:
+  description: 出張と経費の申請の Excel を読み、出張旅費規程と経費精算規程に合わない行を、根拠の条文付きで一覧にする
+  icon: 🧾
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: 申請を規程と照らし合わせる
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    edges:
+    - {id: start-read, source: start, sourceHandle: source, target: read, targetHandle: target}
+    - {id: read-words, source: read, sourceHandle: source, target: words, targetHandle: target}
+    - {id: words-kr, source: words, sourceHandle: source, target: kr, targetHandle: target}
+    - {id: kr-rules, source: kr, sourceHandle: source, target: rules, targetHandle: target}
+    - {id: rules-llm, source: rules, sourceHandle: source, target: llm, targetHandle: target}
+    - {id: llm-end, source: llm, sourceHandle: source, target: end, targetHandle: target}
+    nodes:
+    - data:
+        desc: ''
+        title: 開始
+        type: start
+        variables:
+        - allowed_file_extensions: []
+          allowed_file_types: [document]
+          allowed_file_upload_methods: [local_file]
+          label: 申請の Excel
+          required: true
+          type: file
+          variable: application
+      id: start
+      position: {x: 30, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        is_array_file: false
+        title: 申請を読む
+        type: document-extractor
+        variable_selector: [start, application]
+      id: read
+      position: {x: 330, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        template: 出張旅費 宿泊費 交通費 グリーン車 日当 精算の期限 経費精算 締め日 事前申請 タクシー 会議費
+        title: 調べる語
+        type: template-transform
+        variables: []
+      id: words
+      position: {x: 630, y: 280}
+      type: custom
+    - data:
+        dataset_ids:
+        - ナレッジの ID
+        desc: ''
+        metadata_filtering_conditions:
+          conditions:
+          - {comparison_operator: is, name: 状態, value: 有効}
+          logical_operator: and
+        metadata_filtering_mode: manual
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model: {model: jina-reranker-m0, provider: langgenius/jina/jina}
+          top_k: 6
+        query_variable_selector: [words, output]
+        retrieval_mode: multiple
+        title: 規程を探す
+        type: knowledge-retrieval
+      id: kr
+      position: {x: 930, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        template: '{% for r in docs %}
+
+          ### {{ r.metadata.document_name }}
+
+          出典: {{ r.metadata.doc_metadata["出典"] }}
+
+          {{ r.content }}
+
+          {% endfor %}'
+        title: 規程を並べる
+        type: template-transform
+        variables:
+        - {value_selector: [kr, result], variable: docs}
+      id: rules
+      position: {x: 1230, y: 280}
+      type: custom
+    - data:
+        context: {enabled: false, variable_selector: []}
+        desc: ''
+        model:
+          completion_params: {temperature: 0}
+          mode: chat
+          name: gpt-6.1-terra
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは、みどり文具株式会社の総務部で、出張と経費の申請を確かめる担当です。次の「社内規程」の条文だけを根拠に、「申請」の各行が規程に合っているかを確かめます。
+
+
+            ## 社内規程
+
+            {{#rules.output#}}
+
+
+            ## 書き方
+
+            - 申請の行ごとに「行番号・項目・内容・判定・理由・根拠」を1つの箇条書きにする
+
+            - 判定は「OK」「違反」「要確認」のどれか。規程に書いていないことや、規程だけでは決められないことは「要確認」にする
+
+            - 根拠には、規程の名前と第何条かを書く
+
+            - 文書の名前に部署名（営業部など）が入っている特例は、申請者の部署が同じときだけ使う
+
+            - 最後に、違反と要確認の件数を書く'
+        - role: user
+          text: '## 申請
+
+            {{#read.text#}}'
+        title: 照らし合わせる
+        type: llm
+        variables: []
+        vision: {enabled: false}
+      id: llm
+      position: {x: 1530, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        outputs:
+        - {value_selector: [llm, text], value_type: string, variable: result}
+        title: 終了
+        type: end
+      id: end
+      position: {x: 1830, y: 280}
+      type: custom

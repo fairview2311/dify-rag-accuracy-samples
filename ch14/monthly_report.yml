@@ -1,0 +1,177 @@
+app:
+  description: 1か月の各アプリの件数を入れると、Excel 365 の記録に1行を書き、報告の PowerPoint 1枚を作って、上司へのメールの下書きに添付する
+  icon: 📈
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: 毎月の効果の報告
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - {name: workbook_id, value: ファイルの ID, value_type: string}
+  - {name: site_id, value: サイトの ID, value_type: string}
+  features: {}
+  graph:
+    edges:
+    - {id: e1, source: start, sourceHandle: source, target: row, targetHandle: target}
+    - {id: e2, source: row, sourceHandle: source, target: write, targetHandle: target}
+    - {id: e3, source: write, sourceHandle: source, target: slide, targetHandle: target}
+    - {id: e4, source: slide, sourceHandle: source, target: pptx, targetHandle: target}
+    - {id: e5, source: pptx, sourceHandle: source, target: draft, targetHandle: target}
+    - {id: e6, source: draft, sourceHandle: source, target: att, targetHandle: target}
+    - {id: e7, source: att, sourceHandle: source, target: end, targetHandle: target}
+    nodes:
+    - data:
+        desc: ''
+        title: 開始
+        type: start
+        variables:
+        - {label: 対象の月（例 2026年10月）, max_length: 20, required: true, type: text-input, variable: month}
+        - {label: Excel の行（2 から順に）, required: true, type: number, variable: line}
+        - {label: 規程の質問の数, required: true, type: number, variable: qa}
+        - {label: 総務部へ回した質問の数, required: true, type: number, variable: sent}
+        - {label: 返信の下書きの実行回数, required: true, type: number, variable: drafts}
+        - {label: 申請の確認の実行回数, required: true, type: number, variable: checks}
+        - {label: 改定のお知らせの実行回数, required: true, type: number, variable: notices}
+        - {label: 受け入れの資料の実行回数, required: true, type: number, variable: onboard}
+        - {label: 報告を送る上司のメールアドレス, max_length: 200, required: true, type: text-input, variable: to}
+      id: start
+      position: {x: 30, y: 280}
+      type: custom
+    - data:
+        code: "import json\n\ndef main(month: str, line: float, qa: float, sent: float, drafts: float, checks: float, notices: float, onboard: float) -> dict:\n    n = int(line)\n    values = [[\"'\" + month, int(qa), int(sent), int(drafts), int(checks), int(notices), int(onboard)]]\n    rate = round((qa - sent) / qa * 100) if qa else 0\n    return {\"range\": f\"A{n}:G{n}\", \"values\": json.dumps(values, ensure_ascii=False), \"rate\": rate}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          range: {children: null, type: string}
+          rate: {children: null, type: number}
+          values: {children: null, type: string}
+        title: 記録の行を作る
+        type: code
+        variables:
+        - {value_selector: [start, month], variable: month}
+        - {value_selector: [start, line], variable: line}
+        - {value_selector: [start, qa], variable: qa}
+        - {value_selector: [start, sent], variable: sent}
+        - {value_selector: [start, drafts], variable: drafts}
+        - {value_selector: [start, checks], variable: checks}
+        - {value_selector: [start, notices], variable: notices}
+        - {value_selector: [start, onboard], variable: onboard}
+      id: row
+      position: {x: 330, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: langgenius/microsoft_excel365/excel365
+        provider_name: langgenius/microsoft_excel365/excel365
+        provider_type: builtin
+        title: Excel に記録する
+        tool_configurations: {}
+        tool_label: write_worksheet_data
+        tool_name: write_worksheet_data
+        tool_node_version: '2'
+        tool_parameters:
+          range: {type: mixed, value: '{{#row.range#}}'}
+          site_id: {type: mixed, value: '{{#env.site_id#}}'}
+          values: {type: mixed, value: '{{#row.values#}}'}
+          workbook_id: {type: mixed, value: '{{#env.workbook_id#}}'}
+          worksheet_name: {type: mixed, value: 月次}
+        type: tool
+      id: write
+      position: {x: 630, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        template: '## {{ month }}の社内業務 AI の利用
+
+
+          - 規程の質問 {{ qa }} 件（AI が答えた {{ qa - sent }} 件・{{ rate }}%）
+
+          - 問い合わせメールの返信の下書き {{ drafts }} 回
+
+          - 経費と出張の申請の確認 {{ checks }} 回
+
+          - 規程の改定のお知らせ {{ notices }} 回・受け入れの資料 {{ onboard }} 回
+
+          - 総務部の担当に回った質問は {{ sent }} 件'
+        title: 報告の文を作る
+        type: template-transform
+        variables:
+        - {value_selector: [start, month], variable: month}
+        - {value_selector: [start, qa], variable: qa}
+        - {value_selector: [start, sent], variable: sent}
+        - {value_selector: [row, rate], variable: rate}
+        - {value_selector: [start, drafts], variable: drafts}
+        - {value_selector: [start, checks], variable: checks}
+        - {value_selector: [start, notices], variable: notices}
+        - {value_selector: [start, onboard], variable: onboard}
+      id: slide
+      position: {x: 930, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: bowenliang123/md_exporter/md_exporter
+        provider_name: bowenliang123/md_exporter/md_exporter
+        provider_type: builtin
+        title: PowerPoint にする
+        tool_configurations: {}
+        tool_label: md_to_pptx
+        tool_name: md_to_pptx
+        tool_node_version: '2'
+        tool_parameters:
+          md_text: {type: mixed, value: '{{#slide.output#}}'}
+          output_filename: {type: mixed, value: '社内業務AIの報告_{{#start.month#}}'}
+        type: tool
+      id: pptx
+      position: {x: 1230, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: langgenius/outlook/outlook
+        provider_name: langgenius/outlook/outlook
+        provider_type: builtin
+        title: メールの下書きを作る
+        tool_configurations: {}
+        tool_label: メールの下書き作成
+        tool_name: draft_email
+        tool_node_version: '2'
+        tool_parameters:
+          body: {type: mixed, value: "お疲れさまです。総務部です。\n\n{{#start.month#}}の社内業務 AI の利用の報告を添付します。\n\n{{#slide.output#}}\n\n毎月の記録は、総務部のチームのファイルの「社内業務AIの月次の件数.xlsx」にあります。"}
+          body_type: {type: constant, value: text}
+          subject: {type: mixed, value: '【報告】{{#start.month#}}の社内業務 AI の利用'}
+          to_recipients: {type: mixed, value: '{{#start.to#}}'}
+        type: tool
+      id: draft
+      position: {x: 1530, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: langgenius/outlook/outlook
+        provider_name: langgenius/outlook/outlook
+        provider_type: builtin
+        title: 報告を添付する
+        tool_configurations: {}
+        tool_label: 下書きに添付ファイルを追加
+        tool_name: add_attachment_to_draft
+        tool_node_version: '2'
+        tool_parameters:
+          draft_id: {type: mixed, value: '{{#draft.draft_id#}}'}
+          file_to_attach: {type: variable, value: [pptx, files]}
+        type: tool
+      id: att
+      position: {x: 1830, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        outputs:
+        - {value_selector: [slide, output], value_type: string, variable: report}
+        - {value_selector: [write, text], value_type: string, variable: excel}
+        - {value_selector: [pptx, files], value_type: 'array[file]', variable: slide_file}
+        title: 終了
+        type: end
+      id: end
+      position: {x: 2130, y: 280}
+      type: custom

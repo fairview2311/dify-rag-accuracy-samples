@@ -1,0 +1,260 @@
+app:
+  description: 新しく入る社員や異動する社員の名前・配属先・入社か異動かを入れると、社内規程と手順書から、受け入れの手順書（Word）とやることのチェックリスト（Excel）を作り、上長へのメールの下書きに添付する
+  icon: 🧭
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: 受け入れの手順書とチェックリスト
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    edges:
+    - {id: e1, source: start, sourceHandle: source, target: query, targetHandle: target}
+    - {id: e2, source: query, sourceHandle: source, target: kr, targetHandle: target}
+    - {id: e3, source: kr, sourceHandle: source, target: rules, targetHandle: target}
+    - {id: e4, source: rules, sourceHandle: source, target: guide, targetHandle: target}
+    - {id: e5, source: guide, sourceHandle: source, target: check, targetHandle: target}
+    - {id: e6, source: check, sourceHandle: source, target: docx, targetHandle: target}
+    - {id: e7, source: docx, sourceHandle: source, target: xlsx, targetHandle: target}
+    - {id: e8, source: xlsx, sourceHandle: source, target: draft, targetHandle: target}
+    - {id: e9, source: draft, sourceHandle: source, target: att1, targetHandle: target}
+    - {id: e10, source: att1, sourceHandle: source, target: att2, targetHandle: target}
+    - {id: e11, source: att2, sourceHandle: source, target: end, targetHandle: target}
+    nodes:
+    - data:
+        desc: ''
+        title: 開始
+        type: start
+        variables:
+        - {label: 名前, max_length: 50, required: true, type: text-input, variable: name}
+        - {label: 配属先の部署, max_length: 50, required: true, type: text-input, variable: dept}
+        - {label: 入社か異動か, options: [入社, 異動], required: true, type: select, variable: kind}
+        - {label: 配属の日, max_length: 30, required: true, type: text-input, variable: day}
+        - {label: 資料を送る上長のメールアドレス, max_length: 200, required: true, type: text-input, variable: to}
+      id: start
+      position: {x: 30, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        template: '{{ kind }}のときにやること 初日 チェックリスト {{ dept }} 業務システムの権限申請 キンタイ セイサンくん PC アカウント 研修 在宅勤務'
+        title: 探す文を作る
+        type: template-transform
+        variables:
+        - {value_selector: [start, kind], variable: kind}
+        - {value_selector: [start, dept], variable: dept}
+      id: query
+      position: {x: 330, y: 280}
+      type: custom
+    - data:
+        dataset_ids:
+        - ナレッジの ID
+        desc: ''
+        metadata_filtering_conditions:
+          conditions:
+          - {comparison_operator: is, name: 状態, value: 有効}
+          logical_operator: and
+        metadata_filtering_mode: manual
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model: {model: jina-reranker-m0, provider: langgenius/jina/jina}
+          top_k: 6
+        query_variable_selector: [query, output]
+        retrieval_mode: multiple
+        title: 手順書を探す
+        type: knowledge-retrieval
+      id: kr
+      position: {x: 630, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        template: '{% for r in docs %}
+
+          ### {{ r.metadata.document_name }}
+
+          出典: {{ r.metadata.doc_metadata["出典"] }}
+
+          {{ r.content }}
+
+          {% endfor %}'
+        title: 手順書を並べる
+        type: template-transform
+        variables:
+        - {value_selector: [kr, result], variable: docs}
+      id: rules
+      position: {x: 930, y: 280}
+      type: custom
+    - data:
+        context: {enabled: false, variable_selector: []}
+        desc: ''
+        model: {completion_params: {temperature: 0.2}, mode: chat, name: gpt-6.1-terra, provider: langgenius/openai/openai}
+        prompt_template:
+        - role: system
+          text: 'あなたは、みどり文具株式会社の総務部の担当です。新しく部署に来る社員のための手順書を、Markdown で書きます。次の「社内の手順書と規程」に書いてあることだけを使います。
+
+
+            ## 社内の手順書と規程
+
+            {{#rules.output#}}
+
+
+            ## 書き方
+
+            - 1行目は「# 」で始まる題名にする（例「# 営業部へようこそ 山田 太郎さんの手順書」）
+
+            - 「## 最初にやること」「## 使う業務システムと申請」「## 知っておく規程」「## 困ったときの問い合わせ先」の4つの見出しを使う
+
+            - 入社か異動かで、使う手順書を選ぶ。部署の名前が入った注意（例「営業部に配属された人は…」）は、配属先が同じときだけ書く
+
+            - 各項目の最後に、もとにした手順書や規程の名前を（）で書く
+
+            - 手順書と規程に無いことは書かない。表は使わない'
+        - role: user
+          text: '名前: {{#start.name#}}
+
+            配属先: {{#start.dept#}}
+
+            入社か異動か: {{#start.kind#}}
+
+            配属の日: {{#start.day#}}'
+        title: 手順書の文を作る
+        type: llm
+        variables: []
+        vision: {enabled: false}
+      id: guide
+      position: {x: 1230, y: 280}
+      type: custom
+    - data:
+        context: {enabled: false, variable_selector: []}
+        desc: ''
+        model: {completion_params: {temperature: 0}, mode: chat, name: gpt-6.1-terra, provider: langgenius/openai/openai}
+        prompt_template:
+        - role: system
+          text: '手順書をもとに、やることのチェックリストを Markdown の表で1つだけ作ります。
+
+
+            ## 書き方
+
+            - 列は「順番」「やること」「担当」「期限」「済み」の5つ。「済み」の列は空にする
+
+            - 期限は、配属の日をもとに日付で書く（例 初日なら配属の日、1週間以内なら配属の日の7日後）
+
+            - 手順書の「最初にやること」の項目だけを、手順書の順番で入れる。規程の注意（在宅勤務など）は入れない
+
+            - 担当は、本人なら「本人」、それ以外は部署の名前を書く
+
+            - 表のほかの文は書かない'
+        - role: user
+          text: '配属の日: {{#start.day#}}
+
+
+            {{#guide.text#}}'
+        title: チェックリストの表を作る
+        type: llm
+        variables: []
+        vision: {enabled: false}
+      id: check
+      position: {x: 1530, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: bowenliang123/md_exporter/md_exporter
+        provider_name: bowenliang123/md_exporter/md_exporter
+        provider_type: builtin
+        title: Word にする
+        tool_configurations: {}
+        tool_label: md_to_docx
+        tool_name: md_to_docx
+        tool_node_version: '2'
+        tool_parameters:
+          md_text: {type: mixed, value: '{{#guide.text#}}'}
+          output_filename: {type: mixed, value: '受け入れの手順書_{{#start.name#}}'}
+        type: tool
+      id: docx
+      position: {x: 1830, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: bowenliang123/md_exporter/md_exporter
+        provider_name: bowenliang123/md_exporter/md_exporter
+        provider_type: builtin
+        title: Excel にする
+        tool_configurations: {}
+        tool_label: md_to_xlsx
+        tool_name: md_to_xlsx
+        tool_node_version: '2'
+        tool_parameters:
+          md_text: {type: mixed, value: '{{#check.text#}}'}
+          output_filename: {type: mixed, value: 'やることのチェックリスト_{{#start.name#}}'}
+        type: tool
+      id: xlsx
+      position: {x: 2130, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: langgenius/outlook/outlook
+        provider_name: langgenius/outlook/outlook
+        provider_type: builtin
+        title: メールの下書きを作る
+        tool_configurations: {}
+        tool_label: メールの下書き作成
+        tool_name: draft_email
+        tool_node_version: '2'
+        tool_parameters:
+          body: {type: mixed, value: "{{#start.dept#}} 上長各位\n\n{{#start.day#}}に{{#start.kind#}}で配属される {{#start.name#}} さんの、受け入れの手順書とやることのチェックリストを添付します。内容を確かめて、ご本人に渡してください。\n\n総務部"}
+          body_type: {type: constant, value: text}
+          subject: {type: mixed, value: '【受け入れ】{{#start.name#}} さんの手順書とチェックリスト'}
+          to_recipients: {type: mixed, value: '{{#start.to#}}'}
+        type: tool
+      id: draft
+      position: {x: 2430, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: langgenius/outlook/outlook
+        provider_name: langgenius/outlook/outlook
+        provider_type: builtin
+        title: 手順書を添付する
+        tool_configurations: {}
+        tool_label: 下書きに添付ファイルを追加
+        tool_name: add_attachment_to_draft
+        tool_node_version: '2'
+        tool_parameters:
+          draft_id: {type: mixed, value: '{{#draft.draft_id#}}'}
+          file_to_attach: {type: variable, value: [docx, files]}
+        type: tool
+      id: att1
+      position: {x: 2730, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        provider_id: langgenius/outlook/outlook
+        provider_name: langgenius/outlook/outlook
+        provider_type: builtin
+        title: チェックリストを添付する
+        tool_configurations: {}
+        tool_label: 下書きに添付ファイルを追加
+        tool_name: add_attachment_to_draft
+        tool_node_version: '2'
+        tool_parameters:
+          draft_id: {type: mixed, value: '{{#draft.draft_id#}}'}
+          file_to_attach: {type: variable, value: [xlsx, files]}
+        type: tool
+      id: att2
+      position: {x: 3030, y: 280}
+      type: custom
+    - data:
+        desc: ''
+        outputs:
+        - {value_selector: [docx, files], value_type: 'array[file]', variable: guide_file}
+        - {value_selector: [xlsx, files], value_type: 'array[file]', variable: checklist_file}
+        title: 終了
+        type: end
+      id: end
+      position: {x: 3330, y: 280}
+      type: custom
